@@ -1,10 +1,10 @@
 # 健身打卡日历
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/liangnianzhi/fitness-checkin-calendar)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/liangnianzhi/fitness)
 
 点上面的按钮，整套应用会部署到你自己的 Cloudflare 账号，不用装任何东西。
 
-浏览器会跳到 Cloudflare 的配置页，确认仓库名和 Worker 名后点 Deploy。Cloudflare 会自动完成三件事：把源码复制到你自己的 GitHub 账号下（之后可以继续改）、创建打卡记录用的 KV 命名空间并回填 id、构建并发布到 `https://fitness-checkin-calendar.你的子域.workers.dev`。
+浏览器会跳到 Cloudflare 的配置页，确认仓库名和 Worker 名后点 Deploy。Cloudflare 会自动完成三件事：把源码复制到你自己的 GitHub 账号下（之后可以继续改）、创建打卡记录用的 KV 命名空间并回填 id、构建并发布到 `https://fitness.你的子域.workers.dev`。
 
 部署完用 iPhone Safari 打开这个地址，点分享，选 添加到主屏幕，就是一个全屏的打卡 App。想换名字或绑自定义域名，都在 Cloudflare 控制台的 Worker 详情页里改。
 
@@ -93,7 +93,7 @@ Cloudflare Workers 支持 **Custom Domain**，把自有域名解析到 Cloudflar
 
 ### 方案二：继续用 workers.dev，但走 Cloudflare 优选 IP
 
-用 [CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 这类工具测出当前可用的 CF 边缘 IP，然后把 `fitness.liangnianmoran.workers.dev` 通过本地 hosts 文件指向优选 IP。
+用 [CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest) 这类工具测出当前可用的 CF 边缘 IP，然后把 `fitness.你的子域.workers.dev` 通过本地 hosts 文件指向优选 IP。
 **缺点**：只对你自己那台设备有效，换网络或 IP 变化就要重测，不适合分享给别人。
 
 ### 方案三：换平台
