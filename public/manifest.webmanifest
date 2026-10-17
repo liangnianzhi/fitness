@@ -1,0 +1,16 @@
+{
+  "name": "健身打卡",
+  "short_name": "健身打卡",
+  "description": "可编辑的健身打卡日历，周/月/年视图，自动生成每周、每月的健身频次分析。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f2f7",
+  "theme_color": "#f2f2f7",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

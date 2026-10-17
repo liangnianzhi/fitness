@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>健身打卡</title>
+<meta name="description" content="可编辑的健身打卡日历，周 / 月 / 年视图，自动生成每周、每月的健身频次分析。" />
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="健身打卡" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="format-detection" content="telephone=no" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.svg" />
+<link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="no-select">
+<div class="shell">
+  <header class="topbar">
+    <div class="period">
+      <h1 id="periodTitle">2026</h1>
+      <p id="periodSubtitle"></p>
+    </div>
+    <div class="actions">
+      <button class="icon-btn" id="todayBtn" type="button" aria-label="回到今天">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z"/></svg>
+      </button>
+      <button class="icon-btn" id="aiBtn" type="button" aria-label="AI 分析">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5 13.6 9l4.4 1.6-4.4 1.6L12 16.7l-1.6-4.5L6 10.6 10.4 9 12 4.5Z"/><path d="M18.2 15.6l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2Z"/></svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" type="button" aria-label="设置">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l1.7-1.3-2-3.4-2 .8a7.9 7.9 0 0 0-2.6-1.5L14.2 3h-4l-.3 2.1a7.9 7.9 0 0 0-2.6 1.5l-2-.8-2 3.4 1.7 1.3a7.8 7.8 0 0 0 0 3l-1.7 1.3 2 3.4 2-.8a7.9 7.9 0 0 0 2.6 1.5l.3 2.1h4l.3-2.1a7.9 7.9 0 0 0 2.6-1.5l2 .8 2-3.4-1.7-1.3Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <nav class="segmented" aria-label="视图切换">
+    <div class="segmented-thumb" id="segThumb"></div>
+    <button type="button" data-view="week">周</button>
+    <button type="button" data-view="month">月</button>
+    <button type="button" data-view="year">年</button>
+  </nav>
+
+  <div class="calendar">
+    <div id="viewport"></div>
+    <div class="weekday-row" id="weekdays" hidden></div>
+  </div>
+
+  <section class="metrics" id="metrics"></section>
+
+  <button class="checkin" id="checkinBtn" type="button">
+    <span class="checkin-label" id="checkinLabel">立即打卡</span>
+    <span class="checkin-sub" id="checkinSub"></span>
+  </button>
+
+  <section id="reviews" aria-live="polite"></section>
+  <section class="recent" id="recent"></section>
+
+  <footer class="footer">
+    <span id="syncState">记录只保存在本机</span>
+  </footer>
+</div>
+
+<div class="toast-layer" id="toastLayer" aria-live="assertive"></div>
+
+<div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+<div class="sheet" id="editSheet" role="dialog" aria-modal="true" aria-labelledby="editTitle" hidden>
+  <div class="sheet-grabber"></div>
+  <h2 class="sheet-title" id="editTitle">编辑打卡</h2>
+
+  <div class="field">
+    <div class="field-head">
+      <label class="field-label">训练项目（可多选）</label>
+      <span class="field-hint" id="itemCount">已选 0 项</span>
+    </div>
+    <div class="chips" id="editItems"></div>
+    <div class="custom-row" id="customRow">
+      <input type="text" id="customTagInput" class="text-input" placeholder="添加其他项目，例如：战绳、爬楼机" maxlength="12" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" />
+      <button class="mini-btn add" id="customTagAdd" type="button">添加</button>
+    </div>
+    <div class="chips tags-manage" id="customTagList"></div>
+  </div>
+
+  <div class="field">
+    <label class="field-label">每个项目的时长（分钟）</label>
+    <div class="item-rows" id="itemRows"></div>
+  </div>
+
+  <div class="field">
+    <label class="field-label">这次练得有多辛苦</label>
+    <div class="chips" id="editEfforts"></div>
+    <p class="field-hint" id="effortHint"></p>
+  </div>
+
+  <p class="sheet-summary" id="editSummary"></p>
+
+  <div class="sheet-buttons">
+    <button class="sheet-btn danger" id="editDelete" type="button">删除打卡</button>
+    <button class="sheet-btn primary" id="editSave" type="button">保存</button>
+  </div>
+</div>
+
+<div class="sheet-backdrop" id="settingsBackdrop" hidden></div>
+<div class="sheet tall" id="settingsSheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+  <div class="sheet-grabber"></div>
+  <h2 class="sheet-title" id="settingsTitle">设置</h2>
+
+  <div class="group-title">目标</div>
+  <div class="group">
+    <label class="row">
+      <span>每周目标次数</span>
+      <input type="number" id="setWeekGoal" min="1" max="14" step="1" inputmode="numeric" />
+    </label>
+    <label class="row">
+      <span>每月目标次数</span>
+      <input type="number" id="setMonthGoal" min="1" max="60" step="1" inputmode="numeric" />
+    </label>
+    <label class="row">
+      <span>默认时长（分钟）</span>
+      <input type="number" id="setMins" min="5" max="300" step="5" inputmode="numeric" />
+    </label>
+    <label class="row">
+      <span>首次打开自动分析</span>
+      <input type="checkbox" id="setAiAuto" class="switch" />
+    </label>
+  </div>
+
+  <div class="group-title">数据</div>
+  <div class="group">
+    <div class="row stacked">
+      <span>同步口令</span>
+      <input type="text" id="setSyncId" class="mono" placeholder="未启用" autocapitalize="off" autocorrect="off" spellcheck="false" />
+      <p class="row-note" id="syncNote">开启后可在多台设备间同步；口令相当于密码，请勿外传。</p>
+      <div class="row-buttons">
+        <button class="mini-btn" id="syncGen" type="button">生成口令</button>
+        <button class="mini-btn" id="syncCopy" type="button">复制</button>
+        <button class="mini-btn" id="syncNow" type="button">立即同步</button>
+      </div>
+    </div>
+    <button class="row tap" id="exportBtn" type="button"><span>导出记录（JSON）</span><span class="chev">›</span></button>
+    <button class="row tap" id="importBtn" type="button"><span>导入记录</span><span class="chev">›</span></button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden />
+  </div>
+
+  <p class="terms">AI 功能由 <a href="https://github.com/alibaba/page-agent" target="_blank" rel="noopener">alibaba/page-agent</a> 驱动，模型服务由你自己配置或使用官方免费测试接口。</p>
+  <button class="sheet-btn wide" id="settingsClose" type="button">完成</button>
+</div>
+
+<div class="sheet-backdrop" id="aiBackdrop" hidden></div>
+<div class="sheet tall" id="aiSheet" role="dialog" aria-modal="true" aria-labelledby="aiTitle" hidden>
+  <div class="sheet-grabber"></div>
+  <h2 class="sheet-title" id="aiTitle">AI 分析</h2>
+  <p class="ai-status" id="aiStatus">正在加载 page-agent…</p>
+
+  <div class="field">
+    <label class="field-label">服务地址（baseURL）</label>
+    <input type="text" id="aiBaseUrl" class="text-input mono" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" autocapitalize="off" autocorrect="off" spellcheck="false" />
+  </div>
+  <div class="field">
+    <label class="field-label">模型</label>
+    <input type="text" id="aiModel" class="text-input mono" placeholder="qwen3.5-plus" autocapitalize="off" autocorrect="off" spellcheck="false" />
+  </div>
+  <div class="field">
+    <label class="field-label">API Key</label>
+    <input type="password" id="aiApiKey" class="text-input mono" placeholder="sk-…" autocapitalize="off" autocorrect="off" spellcheck="false" />
+  </div>
+  <p class="row-note">留空则使用 page-agent 官方内置的免费测试模型（仅用于技术评估）。Key 只保存在本机浏览器。</p>
+
+  <div class="sheet-buttons">
+    <button class="sheet-btn" id="aiCancel" type="button">取消</button>
+    <button class="sheet-btn primary" id="aiRun" type="button">开始分析</button>
+  </div>
+  <button class="sheet-btn wide" id="aiClose" type="button">关闭</button>
+</div>
+
+<!--
+  阿里 page-agent：官方「一行 script 接入」（README 的 Quick Start）。
+  ?autoInit=false   只加载库，不自动创建 demo agent（我们自己 new PageAgent，以便传入分析指令）
+  ?showPanel=false  不默认弹面板（面板只在我们发起分析时才 show）
+  ?lang=zh-CN       面板中文
+  国内访问 jsDelivr 不稳时，app.js 会自动回退到 npmmirror 镜像：
+  https://registry.npmmirror.com/page-agent/1.12.4/files/dist/iife/page-agent.demo.js
+-->
+<script type="module" src="./app.js"></script>
+<script
+  src="https://cdn.jsdelivr.net/npm/page-agent@1.12.4/dist/iife/page-agent.demo.js?autoInit=false&showPanel=false&lang=zh-CN"
+  crossorigin="anonymous"
+  defer
+  onerror="window.__fitcalPageAgentFailed = true"
+></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "fitness",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "description": "苹果风格的可编辑健身打卡日历，周/月/年视图，部署在 Cloudflare Workers，并接入阿里 page-agent 做每周/每月健身频次分析。",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/analysis.test.js test/store.test.js test/worker.test.js test/edge.test.js test/items.test.js",
+    "check": "node --check public/app.js && node --check public/analysis.js && node --check public/store.js && node --check src/worker.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.30.0"
+  }
+}

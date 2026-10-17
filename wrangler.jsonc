@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fitness",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-17",
+
+  // 静态资源：public/ 直接当站点发布，Worker 只处理 /api/*
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // 打卡记录的可选云端备份。声明在配置里，Deploy to Cloudflare 按钮
+  // 会自动创建命名空间并把 id 回填到新仓库的配置中。
+  "kv_namespaces": [{ "binding": "CHECKINS", "id": "8e02c729c6924969a7b3d6c20c6ceb2d" }],
+
+  "observability": {
+    "enabled": true
+  }
+}
