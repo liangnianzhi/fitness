@@ -16,10 +16,12 @@ from . import statics as st
 
 # 常见部位关键词，用来从项目名里认出「这次练的是哪儿」
 PART_KEYWORDS = {
-    "腿": ["腿", "深蹲", "硬拉", "弓步", "臀", "小腿"],
+    "腿": ["腿", "深蹲", "硬拉", "弓步", "臀", "小腿", "下肢"],
+    # 「力量训练」是 App 内置项目名，单独说出来时看不出练哪儿，统一归到全身
+    "全身": ["力量训练", "撸铁", "举铁", "力量", "无氧", "哑铃", "杠铃"],
     "上肢": ["胸", "背", "肩", "手臂", "二头", "三头", "上肢", "卧推", "引体", "划船"],
     "核心": ["核心", "腹", "平板", "卷腹"],
-    "有氧": ["跑步", "跑", "骑车", "动感单车", "游泳", "有氧", "跳绳", "椭圆", "爬楼"],
+    "有氧": ["跑步", "跑", "骑车", "动感单车", "游泳", "有氧", "跳绳", "椭圆", "爬楼", "团操", "单车"],
     "柔韧": ["拉伸", "瑜伽", "放松", "泡沫轴", "柔韧"],
 }
 
@@ -98,11 +100,14 @@ def suggestion(doc: dict, today: date | None = None) -> str:
     # 2) 最该补的部位
     if neglected:
         lines.append(f"{'、'.join(neglected)} 已经 10 天以上没练了，下次优先安排。")
-    elif parts["counts"]:
-        top = max(parts["counts"].items(), key=lambda kv: kv[1])
-        lines.append(f"最近 {parts['days']} 天练得最多的是 {top[0]}（{top[1]} 次），分布还算均衡。")
     else:
-        lines.append("记录还太少，先攒两三次再谈分布。")
+        # 只在能识别出具体部位时才下结论；「其他」不算部位，说了等于没说
+        known = {k: v for k, v in parts["counts"].items() if k != "其他"}
+        if known:
+            top = max(known.items(), key=lambda kv: kv[1])
+            lines.append(f"最近 {parts['days']} 天练得最多的是 {top[0]}（{top[1]} 次）。")
+        else:
+            lines.append("记录还太少，先攒两三次再谈分布。")
 
     return " ".join(lines)
 
