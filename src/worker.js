@@ -225,6 +225,36 @@ function applyDayOp(doc, op) {
     return next
   }
 
+  // append：在当天已有日程上追加项目，而不是整体替换。
+  // 解决「先说练了力量训练，再说又拉伸了 15 分钟」时后一次把前一次冲掉的问题。
+  if (op.action === 'append') {
+    const beforeAppend = next.marks[key]
+    const existing = beforeAppend && Array.isArray(beforeAppend.items) ? beforeAppend.items : []
+    const settings2 = next.settings || {}
+    const addMins = clampInt(settings2.defaultMins, 40, 1, 600)
+    const addEffort = normalizeEffort(settings2.defaultEffort)
+    const fresh = normalizeItems(op.items, addMins, addEffort)
+    if (!fresh.length) return next
+
+    // 同名项目直接合并时长，避免出现两条「拉伸」
+    const merged = existing.map((it) => ({ ...it }))
+    for (const item of fresh) {
+      const hit = merged.find((e) => e.name === item.name)
+      if (hit) {
+        hit.mins = Math.min(600, Number(hit.mins || 0) + Number(item.mins || 0))
+        if (EFFORT_RANK[item.effort] > EFFORT_RANK[hit.effort]) hit.effort = item.effort
+      } else {
+        merged.push(item)
+      }
+    }
+    const capped = merged.slice(0, MAX_ITEMS_PER_DAY)
+    const derivedAppend = deriveDay(capped)
+    next.marks[key] = { t, mins: derivedAppend.mins, effort: derivedAppend.effort, items: capped }
+    delete next.unmarks[key]
+    next.meta = { ...(next.meta || {}), updatedAt: t }
+    return next
+  }
+
   // mark / update：已有记录时作为兜底默认值，与 markDay 的 patch 语义一致
   const before = next.marks[key]
   const settings = next.settings || {}
@@ -382,8 +412,8 @@ export default {
         if (!isIsoDay(op.day)) {
           return json({ error: 'day 必须是 YYYY-MM-DD' }, 400, CORS_HEADERS)
         }
-        if (!['mark', 'unmark'].includes(op.action)) {
-          return json({ error: 'action 必须是 mark 或 unmark' }, 400, CORS_HEADERS)
+        if (!['mark', 'append', 'unmark'].includes(op.action)) {
+          return json({ error: 'action 必须是 mark、append 或 unmark' }, 400, CORS_HEADERS)
         }
 
         const stored = await loadStored(env, key)

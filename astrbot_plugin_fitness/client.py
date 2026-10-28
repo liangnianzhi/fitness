@@ -148,6 +148,16 @@ class FitnessClient:
             payload["effort"] = effort
         return await self._request("POST", f"{self._state_url}/mark", payload)
 
+    async def append_day(self, day: str, items: list[dict]) -> dict:
+        """在当天已有日程上追加项目（同名自动合并时长），用于「又练了…」这类补充。
+
+        与 mark_day 的区别：mark_day 是整体替换（改档），append_day 是累加。
+        """
+        self.ensure_ready()
+        return await self._request(
+            "POST", f"{self._state_url}/mark", {"action": "append", "day": day, "items": items}
+        )
+
     async def unmark_day(self, day: str) -> dict:
         """取消某天的打卡。"""
         self.ensure_ready()

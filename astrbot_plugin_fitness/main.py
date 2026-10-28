@@ -185,6 +185,7 @@ class FitnessPlugin(Star):
         date_hint: str = "",
         mins: str = "",
         effort: str = "",
+        mode: str = "auto",
     ):
         """记录一次健身打卡到日历（支持今天、补录历史、多个训练项目）。
 
@@ -197,6 +198,9 @@ class FitnessPlugin(Star):
             date_hint(string): 日期。可以填「今天」「昨天」「前天」或 2026-10-28、10-28。用户没提日期就留空（默认今天）。
             mins(string): 时长分钟数，纯数字。用户没说就留空。
             effort(string): 辛苦程度，可选 easy/normal/hard/drained/maxed 或 轻松/适中/吃力/脱力/力竭。用户没说就留空。
+            mode(string): 写入方式。用户说「又练了」「再加一个」这类补充时填 append（累加到当天已有记录）；
+                说「记错了」「其实是」「改成」这类修正时填 replace（整体替换当天）；
+                拿不准留空 auto（当天已有记录时按追加处理，避免误删）。
         """
         if not self._allow_tools():
             yield event.plain_result("健身相关功能现在是关闭的。")
@@ -232,7 +236,19 @@ class FitnessPlugin(Star):
                     return
 
             existed = st.mark_of(doc, day) is not None
-            data = await client.mark_day(day, items=item_list)
+
+            # auto：当天已有记录时走追加，避免用户随口补充一句就把整天数据冲掉。
+            action = (mode or "auto").strip().lower()
+            if action in ("replace", "覆盖", "修改", "更正"):
+                data = await client.mark_day(day, items=item_list)
+            elif action in ("append", "追加", "补充"):
+                data = await client.append_day(day, item_list)
+            else:
+                data = (
+                    await client.append_day(day, item_list)
+                    if existed
+                    else await client.mark_day(day, items=item_list)
+                )
             entry = data.get("entry") or {}
             yield event.plain_result(render.render_marked(entry, day, existed))
         except FitnessError as exc:
@@ -392,7 +408,8 @@ def _last_items(doc: dict, today: date, limit: int = 3) -> list[dict] | None:
         name = it.get("name")
         if not name:
             continue
-        entry = {"name": st.clean_tag(name)}
+        # 复用历史项目名时也要过一遍归一表，避免把早先的口语名（如「腿」）一直传下去
+        entry = {"name": canonical_item(name, st.clean_tag)}
         if it.get("mins"):
             entry["mins"] = int(it["mins"])
         out.append(entry)
