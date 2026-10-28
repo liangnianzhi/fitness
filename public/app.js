@@ -294,7 +294,20 @@ async function pushNow() {
   if (!cloud.enabled || !state.settings.syncId || syncing) return
   syncing = true
   try {
-    await sync.push(state.settings.syncId, state)
+    // 优先走服务端合并：手机开着页面时，机器人在其他渠道写入的打卡不会被覆盖
+    if (typeof sync.merge === 'function') {
+      const merged = await sync.merge(state.settings.syncId, state)
+      if (merged && merged !== true) {
+        const before = JSON.stringify(state.marks) + JSON.stringify(state.unmarks)
+        const after = JSON.stringify(merged.marks) + JSON.stringify(merged.unmarks)
+        state = merged
+        saveLocal(state, storage)
+        // 只有云端确实多了东西才重绘，避免每次自动保存都闪一下
+        if (before !== after) renderAll()
+      }
+    } else {
+      await sync.push(state.settings.syncId, state)
+    }
     setSyncLabel('已同步')
   } catch {
     setSyncLabel('同步失败，稍后重试')
