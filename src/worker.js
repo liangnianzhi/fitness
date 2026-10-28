@@ -1,24 +1,34 @@
 /**
- * Cloudflare Worker：静态资源 + 可选云端同步 + 配置下发。
+ * Cloudflare Worker：静态资源 + 云端同步（含服务端合并）+ 配置下发。
  *
  * 路由：
  *   GET  /api/config               前端探测能力（是否配了 KV）
  *   GET  /api/state/:id            读取云端备份
- *   PUT  /api/state/:id            写入云端备份
+ *   PUT  /api/state/:id            写入云端备份（整份覆盖，保留兼容）
+ *   POST /api/state/:id/merge      按天合并后写回（机器人/多设备并发安全）
+ *   POST /api/state/:id/mark       单条打卡 / 改档 / 取消打卡（机器人用）
  *   其它                            交给静态资源（assets binding）
  *
  * 设计取舍：
  *   - 没配 KV 时一切照常工作，前端自动降级为「仅本机保存」，不报错、不影响打卡。
  *   - 同步口令就是访问凭证，所以只接受足够长的随机串，并限制单条体积。
+ *   - merge 的规则与 public/store.js 的 mergeStates 逐条对齐：
+ *     按天 last-write-wins，marks 与 unmarks 各取较新时间戳，二者再比大小定最终状态。
+ *     这样手机上正在开的页面 push 时，不再能覆盖掉机器人刚写入的打卡。
  */
 
 const SYNC_ID_RE = /^[A-Za-z0-9_-]{16,64}$/
 const MAX_BODY_BYTES = 256 * 1024
 const MAX_DAYS = 4000 // 约 10 年的打卡记录，防止被灌爆
 const EFFORT_IDS = ['easy', 'normal', 'hard', 'drained', 'maxed']
+const EFFORT_RANK = { easy: 0, normal: 1, hard: 2, drained: 3, maxed: 4 }
+const DEFAULT_EFFORT = 'normal'
+const DEFAULT_ITEM_NAME = '训练'
+const MAX_TAG_LEN = 12
+const MAX_ITEMS_PER_DAY = 12
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET, PUT, OPTIONS',
+  'access-control-allow-methods': 'GET, PUT, POST, OPTIONS',
   'access-control-allow-headers': 'content-type',
 }
 
@@ -37,7 +47,50 @@ function isIsoDay(key) {
   return typeof key === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(key)
 }
 
-/** 校验前端提交的文档，只保留结构合法的部分 */
+function cleanTag(raw) {
+  if (typeof raw !== 'string') return ''
+  return raw.replace(/\s+/g, ' ').trim().slice(0, MAX_TAG_LEN)
+}
+
+function clampInt(v, fallback, min, max) {
+  const n = Math.round(Number(v))
+  const base = Number.isFinite(n) ? n : fallback
+  return Math.min(max, Math.max(min, base))
+}
+
+function normalizeEffort(raw) {
+  return EFFORT_IDS.includes(raw) ? raw : DEFAULT_EFFORT
+}
+
+function normalizeItems(rawItems, fallbackMins, fallbackEffort) {
+  const list = Array.isArray(rawItems) ? rawItems : []
+  const out = []
+  for (const it of list) {
+    if (!it || typeof it !== 'object') continue
+    const name = cleanTag(it.name)
+    if (!name) continue
+    out.push({
+      name,
+      mins: clampInt(it.mins, fallbackMins, 1, 600),
+      effort: normalizeEffort(it.effort || fallbackEffort),
+    })
+    if (out.length >= MAX_ITEMS_PER_DAY) break
+  }
+  return out
+}
+
+/** 由 items 推导整天的总时长与辛苦程度（取最高档），与 store.js 的 deriveDay 一致 */
+function deriveDay(items) {
+  let mins = 0
+  let effort = items.length ? 'easy' : DEFAULT_EFFORT
+  for (const it of items) {
+    mins += Number(it.mins || 0)
+    if (EFFORT_RANK[it.effort] > EFFORT_RANK[effort]) effort = it.effort
+  }
+  return { mins, effort }
+}
+
+/** 校验并规整完整文档，只保留结构合法的部分 */
 function sanitizeDoc(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const marks = raw.marks && typeof raw.marks === 'object' ? raw.marks : null
@@ -50,22 +103,22 @@ function sanitizeDoc(raw) {
     if (!isIsoDay(key)) continue
     const m = marks[key]
     if (!m || typeof m !== 'object') continue
+    const fallbackMins = clampInt(m.mins, 40, 1, 600)
+    const fallbackEffort = normalizeEffort(m.effort)
+
     // 一次健身日程可以包含多个项目，每个项目有自己的时长与辛苦程度
-    const items = Array.isArray(m.items)
-      ? m.items
-          .filter((it) => it && typeof it === 'object' && typeof it.name === 'string' && it.name.trim())
-          .slice(0, 12)
-          .map((it) => ({
-            name: String(it.name).trim().slice(0, 12),
-            mins: Number.isFinite(Number(it.mins)) ? Math.max(1, Math.min(600, Math.round(Number(it.mins)))) : 40,
-            effort: EFFORT_IDS.includes(it.effort) ? it.effort : 'normal',
-          }))
-      : []
+    let items = normalizeItems(m.items, fallbackMins, fallbackEffort)
+    if (!items.length) {
+      // v1 数据：只有 kind + mins 的老记录，转成一条同名项目
+      const legacyName = cleanTag(m.kind) || DEFAULT_ITEM_NAME
+      items = [{ name: legacyName, mins: fallbackMins, effort: fallbackEffort }]
+    }
+    const derived = deriveDay(items)
 
     cleanMarks[key] = {
       t: Number.isFinite(Number(m.t)) ? Math.max(0, Math.round(Number(m.t))) : 0,
-      mins: Number.isFinite(Number(m.mins)) ? Math.max(1, Math.min(600, Math.round(Number(m.mins)))) : 40,
-      effort: EFFORT_IDS.includes(m.effort) ? m.effort : 'normal',
+      mins: derived.mins,
+      effort: derived.effort,
       items,
     }
   }
@@ -87,6 +140,153 @@ function sanitizeDoc(raw) {
   }
 }
 
+function uniqueTags(list, max = 40) {
+  const seen = new Set()
+  const out = []
+  for (const item of list) {
+    const tag = cleanTag(item)
+    if (!tag || seen.has(tag)) continue
+    seen.add(tag)
+    out.push(tag)
+    if (out.length >= max) break
+  }
+  return out
+}
+
+/**
+ * 合并两个文档。规则与 store.js 的 mergeStates 对齐：
+ *  - 每天 marks 取 t 较大的一份；
+ *  - unmarks 取较大时间戳；
+ *  - settings 听 settingsAt 较晚的一方，自定义标签取并集。
+ */
+function mergeDocs(a, b) {
+  const A = sanitizeDoc(a) || { version: 1, marks: {}, unmarks: {}, settings: {}, meta: {} }
+  const B = sanitizeDoc(b) || { version: 1, marks: {}, unmarks: {}, settings: {}, meta: {} }
+
+  const marks = {}
+  for (const key of new Set([...Object.keys(A.marks), ...Object.keys(B.marks)])) {
+    const ma = A.marks[key]
+    const mb = B.marks[key]
+    if (ma && mb) marks[key] = Number(ma.t) >= Number(mb.t) ? ma : mb
+    else marks[key] = ma || mb
+  }
+
+  const unmarks = {}
+  for (const key of new Set([...Object.keys(A.unmarks), ...Object.keys(B.unmarks)])) {
+    const ua = Number(A.unmarks[key] || 0)
+    const ub = Number(B.unmarks[key] || 0)
+    const t = Math.max(ua, ub)
+    if (t > 0) unmarks[key] = t
+  }
+
+  const sa = A.settings || {}
+  const sb = B.settings || {}
+  const settingsAtA = Number((A.meta && A.meta.settingsAt) || 0)
+  const settingsAtB = Number((B.meta && B.meta.settingsAt) || 0)
+  const settings = { ...(settingsAtA >= settingsAtB ? sa : sb) }
+  settings.customTags = uniqueTags([...(sa.customTags || []), ...(sb.customTags || [])])
+  settings.quickItems = uniqueTags([...(sa.quickItems || []), ...(sb.quickItems || [])])
+  settings.itemMins = { ...(sa.itemMins || {}), ...(sb.itemMins || {}) }
+  settings.syncId = sa.syncId || sb.syncId || settings.syncId || ''
+
+  const metaA = A.meta || {}
+  const metaB = B.meta || {}
+  const meta = {
+    updatedAt: Math.max(Number(metaA.updatedAt || 0), Number(metaB.updatedAt || 0)),
+    settingsAt: Math.max(settingsAtA, settingsAtB),
+    lastWeeklySeen:
+      String(metaA.lastWeeklySeen || '') > String(metaB.lastWeeklySeen || '')
+        ? metaA.lastWeeklySeen
+        : metaB.lastWeeklySeen,
+    lastMonthlySeen:
+      String(metaA.lastMonthlySeen || '') > String(metaB.lastMonthlySeen || '')
+        ? metaA.lastMonthlySeen
+        : metaB.lastMonthlySeen,
+    seeded: !!metaA.seeded || !!metaB.seeded,
+  }
+
+  return { version: 1, marks, unmarks, settings, meta }
+}
+
+/** 对单天执行打卡 / 改档 / 取消，规则与 store.js 的 markDay / unmarkDay 对齐 */
+function applyDayOp(doc, op) {
+  const next = sanitizeDoc(doc) || { version: 1, marks: {}, unmarks: {}, settings: {}, meta: {} }
+  const key = op.day
+  const now = Date.now()
+  const t = Number.isFinite(Number(op.t)) && Number(op.t) > 0 ? Math.round(Number(op.t)) : now
+
+  if (op.action === 'unmark') {
+    delete next.marks[key]
+    next.unmarks[key] = t
+    next.meta = { ...(next.meta || {}), updatedAt: t }
+    return next
+  }
+
+  // mark / update：已有记录时作为兜底默认值，与 markDay 的 patch 语义一致
+  const before = next.marks[key]
+  const settings = next.settings || {}
+  const defaultMins = clampInt(settings.defaultMins, 40, 1, 600)
+  const defaultEffort = normalizeEffort(settings.defaultEffort)
+
+  let items
+  if (Array.isArray(op.items) && op.items.length) {
+    items = normalizeItems(op.items, defaultMins, defaultEffort)
+  } else {
+    const name =
+      cleanTag(op.name) ||
+      (before && before.items && before.items[0] && before.items[0].name) ||
+      DEFAULT_ITEM_NAME
+    const mins = clampInt(
+      op.mins !== undefined ? op.mins : before ? before.mins : defaultMins,
+      defaultMins,
+      1,
+      600
+    )
+    const effort = normalizeEffort(op.effort || (before && before.effort) || defaultEffort)
+    items = [{ name, mins, effort }]
+  }
+  if (!items.length) {
+    items = [{ name: DEFAULT_ITEM_NAME, mins: defaultMins, effort: defaultEffort }]
+  }
+
+  const derived = deriveDay(items)
+  next.marks[key] = { t, mins: derived.mins, effort: derived.effort, items }
+  delete next.unmarks[key]
+  next.meta = { ...(next.meta || {}), updatedAt: t }
+  return next
+}
+
+async function readJson(request) {
+  const length = Number(request.headers.get('content-length') || 0)
+  if (length > MAX_BODY_BYTES) return { error: json({ error: '记录体积过大' }, 413, CORS_HEADERS) }
+  let text
+  try {
+    text = await request.text()
+  } catch {
+    return { error: json({ error: '读取请求体失败' }, 400, CORS_HEADERS) }
+  }
+  if (text.length > MAX_BODY_BYTES) {
+    return { error: json({ error: '记录体积过大' }, 413, CORS_HEADERS) }
+  }
+  try {
+    return { body: JSON.parse(text) }
+  } catch {
+    return { error: json({ error: '请求体不是合法 JSON' }, 400, CORS_HEADERS) }
+  }
+}
+
+async function loadStored(env, key) {
+  const stored = await env.CHECKINS.get(key, 'json')
+  if (!stored) return { doc: null, updatedAt: null }
+  return { doc: stored.doc || null, updatedAt: stored.updatedAt || null }
+}
+
+async function saveDoc(env, key, doc) {
+  const updatedAt = new Date().toISOString()
+  await env.CHECKINS.put(key, JSON.stringify({ doc, updatedAt }))
+  return updatedAt
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
@@ -101,6 +301,7 @@ export default {
           store: !!env.CHECKINS,
           version: 1,
           app: 'fitness-checkin-calendar',
+          merge: true, // 支持 POST /merge 与 /mark，前端与机器人可据此走安全路径
         },
         200,
         CORS_HEADERS
@@ -108,7 +309,12 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/state/')) {
-      const id = decodeURIComponent(url.pathname.slice('/api/state/'.length))
+      const rest = url.pathname.slice('/api/state/'.length)
+      // 兼容 /api/state/:id/merge 与 /api/state/:id/mark
+      const segments = rest.split('/')
+      const id = decodeURIComponent(segments[0] || '')
+      const action = segments[1] || ''
+
       if (!SYNC_ID_RE.test(id)) {
         return json({ error: '同步口令格式不合法（需 16–64 位字母、数字、- 或 _）' }, 400, CORS_HEADERS)
       }
@@ -118,34 +324,62 @@ export default {
 
       const key = `state:${id}`
 
-      if (request.method === 'GET') {
-        const stored = await env.CHECKINS.get(key, 'json')
-        if (!stored) return json({ ok: true, doc: null }, 200, CORS_HEADERS)
-        return json({ ok: true, doc: stored.doc || null, updatedAt: stored.updatedAt || null }, 200, CORS_HEADERS)
+      if (action === '') {
+        if (request.method === 'GET') {
+          const stored = await loadStored(env, key)
+          if (!stored.doc) return json({ ok: true, doc: null }, 200, CORS_HEADERS)
+          return json({ ok: true, doc: stored.doc, updatedAt: stored.updatedAt }, 200, CORS_HEADERS)
+        }
+
+        if (request.method === 'PUT') {
+          const parsed = await readJson(request)
+          if (parsed.error) return parsed.error
+          const doc = sanitizeDoc(parsed.body)
+          if (!doc) return json({ error: '记录结构不合法' }, 400, CORS_HEADERS)
+          const updatedAt = await saveDoc(env, key, doc)
+          return json({ ok: true, updatedAt }, 200, CORS_HEADERS)
+        }
+
+        return json({ error: '方法不支持' }, 405, CORS_HEADERS)
       }
 
-      if (request.method === 'PUT') {
-        const length = Number(request.headers.get('content-length') || 0)
-        if (length > MAX_BODY_BYTES) {
-          return json({ error: '记录体积过大' }, 413, CORS_HEADERS)
-        }
-        let body
-        try {
-          const text = await request.text()
-          if (text.length > MAX_BODY_BYTES) return json({ error: '记录体积过大' }, 413, CORS_HEADERS)
-          body = JSON.parse(text)
-        } catch {
-          return json({ error: '请求体不是合法 JSON' }, 400, CORS_HEADERS)
-        }
-        const doc = sanitizeDoc(body)
-        if (!doc) return json({ error: '记录结构不合法' }, 400, CORS_HEADERS)
+      // POST /api/state/:id/merge —— 服务端按天合并，避免并发互相覆盖
+      if (action === 'merge' && request.method === 'POST') {
+        const parsed = await readJson(request)
+        if (parsed.error) return parsed.error
+        const incoming = sanitizeDoc(parsed.body)
+        if (!incoming) return json({ error: '记录结构不合法' }, 400, CORS_HEADERS)
 
-        const updatedAt = new Date().toISOString()
-        await env.CHECKINS.put(key, JSON.stringify({ doc, updatedAt }))
-        return json({ ok: true, updatedAt }, 200, CORS_HEADERS)
+        const stored = await loadStored(env, key)
+        const merged = stored.doc ? mergeDocs(stored.doc, incoming) : incoming
+        const updatedAt = await saveDoc(env, key, merged)
+        return json({ ok: true, updatedAt, doc: merged }, 200, CORS_HEADERS)
       }
 
-      return json({ error: '方法不支持' }, 405, CORS_HEADERS)
+      // POST /api/state/:id/mark —— 对单天打卡/改档/取消，读-改-写全程在服务端完成
+      if (action === 'mark' && request.method === 'POST') {
+        const parsed = await readJson(request)
+        if (parsed.error) return parsed.error
+        const op = parsed.body || {}
+        if (!isIsoDay(op.day)) {
+          return json({ error: 'day 必须是 YYYY-MM-DD' }, 400, CORS_HEADERS)
+        }
+        if (!['mark', 'unmark'].includes(op.action)) {
+          return json({ error: 'action 必须是 mark 或 unmark' }, 400, CORS_HEADERS)
+        }
+
+        const stored = await loadStored(env, key)
+        const base = stored.doc || { version: 1, marks: {}, unmarks: {}, settings: {}, meta: {} }
+        const next = applyDayOp(base, op)
+        const updatedAt = await saveDoc(env, key, next)
+        return json(
+          { ok: true, updatedAt, doc: next, day: op.day, entry: next.marks[op.day] || null },
+          200,
+          CORS_HEADERS
+        )
+      }
+
+      return json({ error: 'not found' }, 404, CORS_HEADERS)
     }
 
     if (url.pathname.startsWith('/api/')) {
