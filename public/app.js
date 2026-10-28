@@ -447,7 +447,7 @@ function renderMonth(now) {
     const mark = markOf(state, cell.key)
     btn.setAttribute(
       'aria-label',
-      `${cnDateFull(cell.key)}，${mark ? `已打卡 ${KIND_LABELS[mark.kind] || ''} ${mark.mins} 分钟` : '未打卡'}`
+      `${cnDateFull(cell.key)}，${mark ? `已打卡 ${itemsTextFallback(mark)} ${mark.mins} 分钟` : '未打卡'}`
     )
     wrap.appendChild(btn)
   }
@@ -472,7 +472,7 @@ function renderWeek(now) {
       el(
         'span',
         `detail${mark ? '' : ' empty'}`,
-        mark ? `${KIND_LABELS[mark.kind] || '训练'} · ${mark.mins} 分钟` : '未打卡'
+        mark ? `${itemsTextFallback(mark)} · ${mark.mins} 分钟` : '未打卡'
       )
     )
     const tick = el('span', 'tick')
@@ -555,7 +555,7 @@ function renderCheckinButton() {
   checkinBtn.classList.toggle('done', checked)
   if (checked) {
     checkinLabel.textContent = '已完成打卡'
-    checkinSub.textContent = `${cnDate(selection)} · ${KIND_LABELS[mark.kind] || '训练'} ${mark.mins} 分钟 · 点击撤销`
+    checkinSub.textContent = `${cnDate(selection)} · ${itemsTextFallback(mark)} ${mark.mins} 分钟 · 点击撤销`
   } else {
     checkinLabel.textContent = isToday ? '立即打卡' : '为这天打卡'
     checkinSub.textContent = cnDateFull(selection)
@@ -609,9 +609,19 @@ function renderRecent() {
   recentBox.appendChild(list)
 }
 
-/** 老数据或异常数据没有 items 时的兜底文案 */
+/**
+ * 一天的训练内容摘要。
+ *
+ * v2 数据只有 items（一天可含多个项目），v1 老数据只有 kind —— 两者都要能显示。
+ * 之前这里只读 mark.kind，导致 v2 数据在日历无障碍描述、周视图、
+ * 底部打卡按钮副标题里全都退化成「训练」，看不出练了什么。
+ */
 function itemsTextFallback(mark) {
-  return (mark && mark.kind && KIND_LABELS[mark.kind]) || '训练'
+  if (!mark) return '训练'
+  const items = Array.isArray(mark.items) ? mark.items : []
+  const names = items.map((it) => it && it.name).filter(Boolean)
+  if (names.length) return names.join('、')
+  return (mark.kind && KIND_LABELS[mark.kind]) || '训练'
 }
 
 /** 辛苦程度 id -> 中文标签 */
