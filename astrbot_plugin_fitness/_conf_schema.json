@@ -1,0 +1,25 @@
+{
+  "worker_url": {
+    "type": "string",
+    "description": "健身打卡 Worker 地址",
+    "hint": "一般不用改，已填好你的线上地址",
+    "default": "https://fitness.liangnianmoran.workers.dev"
+  },
+  "sync_id": {
+    "type": "string",
+    "description": "同步口令（可留空）",
+    "hint": "留空即可：插件会自动向 Worker 询问当前口令。仅当你想固定读写某一份记录时才需要填",
+    "default": ""
+  },
+  "request_timeout": {
+    "type": "int",
+    "description": "请求超时（秒）",
+    "default": 15
+  },
+  "allow_llm_tools": {
+    "type": "bool",
+    "description": "允许 AI 调用健身工具",
+    "hint": "保持开启，否则不能用自然对话记录健身",
+    "default": true
+  }
+}

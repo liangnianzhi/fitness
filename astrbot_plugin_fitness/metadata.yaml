@@ -1,0 +1,7 @@
+name: astrbot_plugin_fitness
+display_name: 健身打卡
+desc: 健身打卡日历，直接说人话就能记录和查询，数据与 Cloudflare 上的 App 实时同步
+help: 直接说「今天练了腿 45 分钟」记录；说「我今天练了吗」「这周练了几次」查询
+version: v1.2.0
+author: liangnianzhi
+repo: https://github.com/liangnianzhi/fitness

@@ -38,6 +38,50 @@
 
 ---
 
+## 用聊天记录健身（AstrBot 插件）
+
+仓库里的 `astrbot_plugin_fitness/` 是一个 AstrBot 插件，把这份日历接进聊天。
+**不用任何斜杠命令，直接说人话就行。**
+
+| 你说 | 效果 |
+| --- | --- |
+| 今天练了腿，45 分钟，挺累的 | 记成 力量训练 / 45′ / 吃力 |
+| 昨天跑步 30 分钟 | 补录到昨天 |
+| 前天跑步20分钟加拉伸15分钟 | 一次记两个项目，自动汇总 |
+| 我今天练了吗 | 今天状态 + 本周进度 + 连续天数 |
+| 这周练了几次 | 本周明细，逐天打勾 |
+| 今天记错了，取消一下 | 撤销今天的打卡 |
+
+### 三个设计要点
+
+1. **业务逻辑不搬进插件。** 打卡规则、多端合并、时长派生全部留在 `store.js` / `worker.js`，
+   插件只做「取文档 → 调接口」，手机和机器人永远同一套口径。
+2. **写操作走 `POST /api/state/:id/mark`。** 由 Worker 在服务端完成读-改-写，
+   所以机器人打卡不会覆盖别的日期，也不会被手机端正在打开的页面 push 顶掉。
+   为此 Worker 新增了 `/mark`、`/merge` 与 `/api/active` 三个端点。
+3. **口令零配置。** Worker 每次写入会把口令登记到 KV 的 `meta:active`，
+   插件读 `GET /api/active` 即可拿到，不用手抄那串 22 位口令。
+
+### 安装
+
+把 `astrbot_plugin_fitness/` 整个目录放进 AstrBot 的 `data/plugins/`，重启后启用即可。
+配置项只有 `worker_url`（已预填）和可选的 `sync_id`。
+
+### 口语归一
+
+说「练腿」「撸铁」「深蹲」都会归到内置的 **力量训练**，「慢跑」「快走」归到 **跑步机**，
+避免日历上冒出一堆同义标签把统计拆散。认不出的词（比如「打球」）保留原样，当作自定义项目。
+
+### 测试
+
+```bash
+npm test          # Worker / 前端 60 个用例
+npm run test:py   # 插件纯逻辑 14 个用例
+npm run test:all  # 全部
+```
+
+---
+
 ## 关于每周、每月分析（重点）
 
 先说结论：能实现，而且不需要额外后端，但要用对 page-agent 的定位。
@@ -139,6 +183,7 @@ Cloudflare Workers 支持 **Custom Domain**，把自有域名解析到 Cloudflar
 - public/icons：矢量图标 icon、icon-maskable、apple-touch-icon
 - src/worker.js：Worker，静态资源加 /api/config 与 /api/state/:id
 - test：node --test 单测，覆盖 analysis、store、worker、edge、items
+- astrbot_plugin_fitness：AstrBot 插件，自然对话打卡与查询
 - wrangler.jsonc：Cloudflare 配置
 - package.json
 
