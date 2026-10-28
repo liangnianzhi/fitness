@@ -3,6 +3,7 @@
  *
  * 路由：
  *   GET  /api/config               前端探测能力（是否配了 KV）
+ *   GET  /api/active               最近一次写入的同步口令（机器人零配置用）
  *   GET  /api/state/:id            读取云端备份
  *   PUT  /api/state/:id            写入云端备份（整份覆盖，保留兼容）
  *   POST /api/state/:id/merge      按天合并后写回（机器人/多设备并发安全）
@@ -15,6 +16,7 @@
  *   - merge 的规则与 public/store.js 的 mergeStates 逐条对齐：
  *     按天 last-write-wins，marks 与 unmarks 各取较新时间戳，二者再比大小定最终状态。
  *     这样手机上正在开的页面 push 时，不再能覆盖掉机器人刚写入的打卡。
+ *   - saveDoc 会顺手登记 meta:active，让机器人插件不必让用户手抄那串口令。
  */
 
 const SYNC_ID_RE = /^[A-Za-z0-9_-]{16,64}$/
@@ -26,6 +28,7 @@ const DEFAULT_EFFORT = 'normal'
 const DEFAULT_ITEM_NAME = '训练'
 const MAX_TAG_LEN = 12
 const MAX_ITEMS_PER_DAY = 12
+const ACTIVE_KEY = 'meta:active'
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, PUT, POST, OPTIONS',
@@ -284,6 +287,11 @@ async function loadStored(env, key) {
 async function saveDoc(env, key, doc) {
   const updatedAt = new Date().toISOString()
   await env.CHECKINS.put(key, JSON.stringify({ doc, updatedAt }))
+  // 登记「当前活跃口令」，让机器人插件不必让用户手抄 syncId。
+  // 只记最后一次写入的口令，单人使用场景足够；多人共用时请各自显式配置。
+  if (key.startsWith('state:')) {
+    await env.CHECKINS.put(ACTIVE_KEY, key.slice('state:'.length))
+  }
   return updatedAt
 }
 
@@ -306,6 +314,16 @@ export default {
         200,
         CORS_HEADERS
       )
+    }
+
+    // GET /api/active —— 返回最近一次写入的同步口令，供机器人零配置接入
+    if (url.pathname === '/api/active') {
+      if (!env.CHECKINS) {
+        return json({ error: '该 Worker 未绑定 KV（CHECKINS）' }, 501, CORS_HEADERS)
+      }
+      const active = await env.CHECKINS.get(ACTIVE_KEY, 'text')
+      if (!active) return json({ ok: true, syncId: null }, 200, CORS_HEADERS)
+      return json({ ok: true, syncId: active }, 200, CORS_HEADERS)
     }
 
     if (url.pathname.startsWith('/api/state/')) {
