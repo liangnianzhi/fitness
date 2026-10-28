@@ -354,8 +354,12 @@ export function coachLine(d) {
       : ''
 
   if (count === 0) {
+    // 对比基准是「上一周期的再前一个」，也就是 d.prevCount。
+    // 原实现经由一层辅助函数间接取值，count 为 0 时会写出「少了 0 次」这种假话，
+    // 这里改成显式命名 drop，并保证只在真有下降时才提。
+    const drop = Number(d.prevCount || 0)
     return trimTo2Sentences(
-      `${unit}一次都没打卡${d.hasPrevData ? `，比${isMonth ? '上上月' : '前一周'}少了 ${Math.abs(prevDelta(d))} 次` : ''}，节奏断了。` +
+      `${unit}一次都没打卡${drop > 0 ? `，比${isMonth ? '上上月' : '前一周'}少了 ${drop} 次` : ''}，节奏断了。` +
         (isMonth
           ? '本月别追次数：先定 3 次 × 20 分钟，做完就算赢，把「能开始」放在「练得狠」前面。'
           : '今天先做 10 分钟拉伸把状态接回来，本周补 3 次、每次 30 分钟。')
@@ -386,10 +390,6 @@ export function coachLine(d) {
     `${unit}只打卡 ${count} 次，离 ${goal} 次目标差得比较多${deltaTxt}。` +
       `本${isMonth ? '月' : '周'}别定高目标，先做到 ${plan}，完成就算达标。`
   )
-}
-
-function prevDelta(d) {
-  return d.prevCount || 0
 }
 
 /**
