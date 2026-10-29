@@ -186,10 +186,15 @@ function mergeDocs(a, b) {
   const sb = B.settings || {}
   const settingsAtA = Number((A.meta && A.meta.settingsAt) || 0)
   const settingsAtB = Number((B.meta && B.meta.settingsAt) || 0)
-  const settings = { ...(settingsAtA >= settingsAtB ? sa : sb) }
-  settings.customTags = uniqueTags([...(sa.customTags || []), ...(sb.customTags || [])])
-  settings.quickItems = uniqueTags([...(sa.quickItems || []), ...(sb.quickItems || [])])
-  settings.itemMins = { ...(sa.itemMins || {}), ...(sb.itemMins || {}) }
+  // 设置不能整份取一方：调用方哪怕只想改一个字段（例如只传 defaultMins），
+  // 只要它的 settingsAt 更新，就会把其他字段（周目标、月目标、aiAuto…）全部抹掉。
+  // 正确做法是按字段合并 —— 调用的那一方显式给出的字段才覆盖，没给就继承原来的。
+  const newer = settingsAtA >= settingsAtB ? sa : sb
+  const older = settingsAtA >= settingsAtB ? sb : sa
+  const settings = { ...older, ...newer }
+  settings.customTags = uniqueTags([...(older.customTags || []), ...(newer.customTags || [])])
+  settings.quickItems = uniqueTags([...(older.quickItems || []), ...(newer.quickItems || [])])
+  settings.itemMins = { ...(older.itemMins || {}), ...(newer.itemMins || {}) }
   settings.syncId = sa.syncId || sb.syncId || settings.syncId || ''
 
   const metaA = A.meta || {}

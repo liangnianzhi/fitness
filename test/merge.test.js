@@ -213,3 +213,26 @@ test('v1 老记录（只有 kind）在 merge 时迁移为 items', async () => {
   assert.equal(data.doc.marks['2026-10-20'].items[0].name, '跑步')
   assert.equal(data.doc.marks['2026-10-20'].mins, 30)
 })
+
+test('/merge：只传部分 settings 时，其他字段不能被抹掉', async () => {
+  const env = fakeEnv()
+  // 先存一份完整设置
+  await postJson(env, `/api/state/${ID}/merge`, {
+    version: 1, marks: {}, unmarks: {},
+    settings: { weekGoal: 3, monthGoal: 12, defaultMins: 40, aiAuto: true, syncId: ID },
+    meta: { settingsAt: 100 },
+  })
+
+  // 再只改 defaultMins，且 settingsAt 更新
+  const res = await postJson(env, `/api/state/${ID}/merge`, {
+    version: 1, marks: {}, unmarks: {},
+    settings: { defaultMins: 30 },
+    meta: { settingsAt: 200 },
+  })
+  const data = await res.json()
+  assert.equal(data.doc.settings.defaultMins, 30, '改动的字段应生效')
+  assert.equal(data.doc.settings.weekGoal, 3, '未提到的字段必须保留')
+  assert.equal(data.doc.settings.monthGoal, 12, '未提到的字段必须保留')
+  assert.equal(data.doc.settings.aiAuto, true, '未提到的字段必须保留')
+  assert.equal(data.doc.settings.syncId, ID, 'syncId 必须保留')
+})
