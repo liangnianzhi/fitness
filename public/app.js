@@ -553,13 +553,25 @@ function renderCheckinButton() {
   const checked = isChecked(state, selection)
   const mark = markOf(state, selection)
   checkinBtn.classList.toggle('done', checked)
+
   if (checked) {
-    checkinLabel.textContent = '已完成打卡'
-    checkinSub.textContent = `${cnDate(selection)} · ${itemsTextFallback(mark)} ${mark.mins} 分钟 · 点击撤销`
-  } else {
-    checkinLabel.textContent = isToday ? '立即打卡' : '为这天打卡'
-    checkinSub.textContent = cnDateFull(selection)
+    // 已打卡的日期：按钮不是「删除」，而是「编辑」。
+    // 以前点一下就撤销，误触直接丢记录，代价太大。
+    checkinLabel.textContent = '编辑这次打卡'
+    checkinSub.textContent = `${cnDate(selection)} · ${itemsTextFallback(mark)} ${mark.mins} 分钟`
+    return
   }
+
+  // 未来日期不能打卡，按钮要直接表达不可用，而不是点了才弹提示
+  if (selection > now) {
+    checkinLabel.textContent = '还没到这一天'
+    checkinSub.textContent = cnDateFull(selection)
+    checkinBtn.disabled = true
+    return
+  }
+  checkinBtn.disabled = false
+  checkinLabel.textContent = isToday ? '立即打卡' : `为 ${cnDate(selection)} 打卡`
+  checkinSub.textContent = isToday ? cnDateFull(selection) : '点击记录这次训练'
 }
 
 function renderRecent() {
@@ -574,7 +586,7 @@ function renderRecent() {
 
   const title = el('div', 'recent-title')
   title.appendChild(el('span', '', '最近打卡'))
-  title.appendChild(el('span', '', allChecked.length ? `共 ${allChecked.length} 次 · 长按可编辑` : ''))
+  title.appendChild(el('span', '', allChecked.length ? `共 ${allChecked.length} 次 · 点一下可编辑` : ''))
   recentBox.appendChild(title)
 
   if (!keys.length) {
@@ -682,6 +694,16 @@ function flashDay(key) {
   setTimeout(() => node.classList.remove('just-checked'), 400)
 }
 
+/**
+ * 点击某一天。
+ *
+ * 交互取舍（对齐常见日历 App 的习惯）：
+ *  - 空白日期：只选中，不直接写数据。以前点一下就打卡，误触就会凭空产生记录，
+ *    而且想「看一眼那天练了什么」也会意外打上卡。
+ *  - 已打卡日期：打开编辑抽屉，改项目/时长/强度都在这里。
+ *  - 未来日期：不响应，只给一句提示。
+ * 真正的写操作统一走「立即打卡」按钮或编辑抽屉的保存，这是用户预期的确认点。
+ */
 function handleDayTap(key) {
   const now = ymd(new Date())
   if (key > now) {
@@ -689,7 +711,16 @@ function handleDayTap(key) {
     return
   }
   selection = key
-  toggleDay(key)
+
+  if (isChecked(state, key)) {
+    // 已有记录：直接进编辑，这是最常做的操作（改时长、换项目）
+    openEditSheet(key)
+    return
+  }
+
+  // 空白日期：只切换选中，并让主按钮跟随这一天
+  renderAll()
+  haptic()
 }
 
 /** 上次用过的项目名，作为新日程的默认值 */
@@ -740,8 +771,8 @@ let gesture = null
 
 /**
  * 统一的按下 / 移动 / 抬起手势：
- *  - 长按某天（或最近记录）-> 打开编辑抽屉
- *  - 轻点某天 -> 打卡 / 打开编辑
+ *  - 轻点某天 -> 选中；已打卡的日期直接打开编辑
+ *  - 长按某天（或最近记录）-> 快捷打开编辑（保留，老用户习惯）
  *  - 轻点年视图里的某个月 -> 跳到该月
  *  - 左右滑动 -> 换周期；上下滑动 -> 翻页
  */
@@ -874,12 +905,15 @@ function attachRecentGestures() {
     recentGesture = null
     clearTimeout(g.timer)
     if (g.longPressFired || g.moved) return
-    // 轻点：跳到那天
+    // 轻点：直接编辑这条记录。
+    // 以前是「跳到那天」，但用户点列表项的本意几乎总是想看/改这一条。
+    // 日历本身有翻页和点选，跳转价值不大，反而是多一次操作。
     cursor = parseYmd(g.dayKey)
     selection = g.dayKey
     view = 'month'
     renderAll()
     haptic()
+    openEditSheet(g.dayKey)
   }
 
   box.addEventListener('pointerup', finish)
@@ -1517,7 +1551,9 @@ function bindEvents() {
   checkinBtn.addEventListener('click', () => {
     const key = selection || ymd(new Date())
     selection = key
-    toggleDay(key)
+    // 已打卡 -> 进编辑；空白 -> 才真的写一条新记录
+    if (isChecked(state, key)) openEditSheet(key)
+    else toggleDay(key)
   })
 
   // 最近记录的长按编辑 / 轻点跳转由 attachRecentGestures() 统一处理，
@@ -1541,11 +1577,24 @@ function bindEvents() {
   $('editDelete').addEventListener('click', () => {
     if (!editTarget) return
     const key = editTarget
+    // 删除前留快照，撤销时原样还原项目/时长/强度
+    const snapshot = markOf(state, key)
     state = unmarkDay(state, key)
     persist()
+    selection = key
     renderAll()
     closeSheet('editSheet')
-    showToast({ text: `已取消 ${cnDate(key)} 的打卡`, icon: 'none' })
+    showToast({
+      text: `已取消 ${cnDate(key)} 的打卡`,
+      icon: 'none',
+      undoLabel: '撤销',
+      onUndo: () => {
+        if (!snapshot) return
+        state = markDay(state, key, { t: Date.now(), items: snapshot.items })
+        persist()
+        renderAll()
+      },
+    })
   })
 
   // 设置

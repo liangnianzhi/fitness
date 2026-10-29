@@ -331,6 +331,18 @@ svg {
   transform: scale(0.9);
 }
 
+/* 选中态：用一圈描边表达「当前操作的是这一天」。
+   以前只有底下 4px 的小圆点，几乎看不见，用户点完不知道怎么确认选中的是哪天。 */
+.day.selected {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  border-radius: 12px;
+}
+
+/* 已打卡的日期已经有实心填充，选中时只在外面再加一圈，避免盖住勾选标记 */
+.day.checked.selected {
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px var(--card);
+}
+
 .day.selected::after {
   content: "";
   position: absolute;
