@@ -346,11 +346,6 @@ export default {
       )
     }
 
-    // GET /api/version —— 探针：用来确认线上跑的是哪一次构建
-    if (url.pathname === '/api/version') {
-      return json({ ok: true, build: 'probe-20261029-a', deployTest: true }, 200, CORS_HEADERS)
-    }
-
     // GET /api/active —— 返回最近一次写入的同步口令，供机器人零配置接入
     if (url.pathname === '/api/active') {
       if (!env.CHECKINS) {
