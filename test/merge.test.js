@@ -236,3 +236,26 @@ test('/merge：只传部分 settings 时，其他字段不能被抹掉', async (
   assert.equal(data.doc.settings.aiAuto, true, '未提到的字段必须保留')
   assert.equal(data.doc.settings.syncId, ID, 'syncId 必须保留')
 })
+
+test('/merge：异常大的 settingsAt 会被限制，不会把后续更新永久卡死', async () => {
+  const env = fakeEnv()
+  // 写入一个天文数字的 settingsAt
+  const res = await postJson(env, `/api/state/${ID}/merge`, {
+    version: 1, marks: {}, unmarks: {},
+    settings: { weekGoal: 3 },
+    meta: { settingsAt: 9999999999999 },
+  })
+  const data = await res.json()
+  const stored = data.doc.meta.settingsAt
+  const cap = Date.now() + 24 * 3600 * 1000
+  assert.ok(stored <= cap, 'settingsAt 不应超过当前时间一天以上')
+
+  // 之后正常更新必须能生效（时间戳要严格大于上一次，模拟真实的时间推进）
+  const res2 = await postJson(env, `/api/state/${ID}/merge`, {
+    version: 1, marks: {}, unmarks: {},
+    settings: { weekGoal: 5 },
+    meta: { settingsAt: Date.now() + 25 * 3600 * 1000 },
+  })
+  const data2 = await res2.json()
+  assert.equal(data2.doc.settings.weekGoal, 5, '上限之后的正常更新必须能生效')
+})

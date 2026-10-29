@@ -199,9 +199,16 @@ function mergeDocs(a, b) {
 
   const metaA = A.meta || {}
   const metaB = B.meta || {}
+  // settingsAt 只取「较新的那一次写入」，而不是盲目取最大值：
+  // 否则一旦有异常的大数（比如手工构造的 9999999999999）落进去，
+  // 之后所有正常更新都比不过它，设置就永久卡死改不动了。
+  // 这里取较大的一方，但限制在合理范围内（未来 1 天以内）。
+  const nowMs = Date.now()
+  const cap = nowMs + 24 * 3600 * 1000
+  const safeSettingsAt = Math.min(Math.max(settingsAtA, settingsAtB), cap)
   const meta = {
     updatedAt: Math.max(Number(metaA.updatedAt || 0), Number(metaB.updatedAt || 0)),
-    settingsAt: Math.max(settingsAtA, settingsAtB),
+    settingsAt: safeSettingsAt,
     lastWeeklySeen:
       String(metaA.lastWeeklySeen || '') > String(metaB.lastWeeklySeen || '')
         ? metaA.lastWeeklySeen
@@ -406,7 +413,9 @@ export default {
         if (!incoming) return json({ error: '记录结构不合法' }, 400, CORS_HEADERS)
 
         const stored = await loadStored(env, key)
-        const merged = stored.doc ? mergeDocs(stored.doc, incoming) : incoming
+        // 空库也要过一遍 mergeDocs：否则第一次写入会跳过所有规整逻辑
+        // （settingsAt 上限、字段合并等），留下隐患。
+        const merged = mergeDocs(stored.doc || {}, incoming)
         const updatedAt = await saveDoc(env, key, merged)
         return json({ ok: true, updatedAt, doc: merged }, 200, CORS_HEADERS)
       }
