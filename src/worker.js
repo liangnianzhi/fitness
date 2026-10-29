@@ -231,7 +231,7 @@ function applyDayOp(doc, op) {
     const beforeAppend = next.marks[key]
     const existing = beforeAppend && Array.isArray(beforeAppend.items) ? beforeAppend.items : []
     const settings2 = next.settings || {}
-    const addMins = clampInt(settings2.defaultMins, 40, 1, 600)
+    const addMins = clampInt(settings2.defaultMins, 40, 5, 300)
     const addEffort = normalizeEffort(settings2.defaultEffort)
     const fresh = normalizeItems(op.items, addMins, addEffort)
     if (!fresh.length) return next
@@ -258,7 +258,9 @@ function applyDayOp(doc, op) {
   // mark / update：已有记录时作为兜底默认值，与 markDay 的 patch 语义一致
   const before = next.marks[key]
   const settings = next.settings || {}
-  const defaultMins = clampInt(settings.defaultMins, 40, 1, 600)
+  // 与前端 store.js 的 normalizeState 保持一致：默认时长 5–300 分钟。
+  // 之前这里写成 1–600，会让云端接受 App 根本不会产生的值，属于口径漂移。
+  const defaultMins = clampInt(settings.defaultMins, 40, 5, 300)
   const defaultEffort = normalizeEffort(settings.defaultEffort)
 
   let items

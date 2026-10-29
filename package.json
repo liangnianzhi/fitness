@@ -10,7 +10,7 @@
     "check": "node --check public/app.js && node --check public/analysis.js && node --check public/store.js && node --check src/worker.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test:py": "python3 -m pytest test/test_plugin.py test/test_insight.py -q",
+    "test:py": "python3 -m pytest test/test_plugin.py test/test_insight.py test/test_concurrency.py -q -p no:cacheprovider",
     "test:all": "npm test && npm run test:py"
   },
   "devDependencies": {

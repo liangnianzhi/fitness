@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from datetime import date, datetime, timedelta
 
 from astrbot.api import logger
@@ -36,6 +38,11 @@ class FitnessPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
         self.config = config or {}
+        # 零配置发现的口令缓存：避免每句话都多打一次 /api/active
+        self._discovered_sync_id = ""
+        self._discovered_at = 0.0
+        # 同一时刻只允许一个写操作，防止连点/并发把同一天的数据写乱
+        self._write_lock: asyncio.Lock | None = None
 
     # ---------- 基础设施 ----------
 
@@ -46,11 +53,28 @@ class FitnessPlugin(Star):
             timeout=int(self.config.get("request_timeout", 15) or 15),
         )
 
-    async def _ready_client(self) -> FitnessClient:
-        """返回已确定 syncId 的客户端（零配置时自动发现）。"""
+    def _lock(self) -> asyncio.Lock:
+        if self._write_lock is None:
+            self._write_lock = asyncio.Lock()
+        return self._write_lock
+
+    async def _ready_client(self, fresh: bool = False) -> FitnessClient:
+        """返回已确定 syncId 的客户端（零配置时自动发现，带 10 分钟缓存）。
+
+        fresh=True 时强制重新发现，用于「发现的口令失效了」这种兜底场景。
+        """
         client = self._client()
-        if not client.sync_id:
-            await client.discover_sync_id()
+        if client.sync_id:
+            return client
+
+        now = time.monotonic()
+        if not fresh and self._discovered_sync_id and now - self._discovered_at < 600:
+            client.sync_id = self._discovered_sync_id
+            return client
+
+        sid = await client.discover_sync_id()
+        self._discovered_sync_id = sid
+        self._discovered_at = now
         return client
 
     def _allow_tools(self) -> bool:
@@ -221,11 +245,12 @@ class FitnessPlugin(Star):
 
         try:
             client = await self._ready_client()
-            doc = await client.pull()
 
             # 用户只说「练了」「还是老样子」而没给项目名时，
             # 沿用最近一次的项目，而不是直接打回。这样一句话就能记完。
+            # 只有这种含糊情况才需要多拉一次数据，明确说了项目就省掉这一趟。
             if not item_list:
+                doc = await client.pull()
                 last_items = _last_items(doc, today=date.today())
                 if last_items:
                     item_list = last_items
@@ -235,20 +260,24 @@ class FitnessPlugin(Star):
                     )
                     return
 
-            existed = st.mark_of(doc, day) is not None
-
             # auto：当天已有记录时走追加，避免用户随口补充一句就把整天数据冲掉。
             action = (mode or "auto").strip().lower()
-            if action in ("replace", "覆盖", "修改", "更正"):
-                data = await client.mark_day(day, items=item_list)
-            elif action in ("append", "追加", "补充"):
-                data = await client.append_day(day, item_list)
-            else:
-                data = (
-                    await client.append_day(day, item_list)
-                    if existed
-                    else await client.mark_day(day, items=item_list)
-                )
+
+            # 同一时刻只允许一次写入：连着说两句「练了腿」「又拉伸了」时，
+            # 若两个请求并发读-改-写，后一个会基于旧快照把前一个覆盖掉。
+            async with self._lock():
+                doc = await client.pull()
+                existed = st.mark_of(doc, day) is not None
+                if action in ("replace", "覆盖", "修改", "更正"):
+                    data = await client.mark_day(day, items=item_list)
+                elif action in ("append", "追加", "补充"):
+                    data = await client.append_day(day, item_list)
+                else:
+                    data = (
+                        await client.append_day(day, item_list)
+                        if existed
+                        else await client.mark_day(day, items=item_list)
+                    )
             entry = data.get("entry") or {}
             yield event.plain_result(render.render_marked(entry, day, existed))
         except FitnessError as exc:
