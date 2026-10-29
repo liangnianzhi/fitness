@@ -289,14 +289,15 @@ class FitnessPlugin(Star):
 
     @filter.llm_tool(name="fitness_status")
     async def fitness_status_tool(self, event: AstrMessageEvent, range: str = "today"):
-        """查询健身打卡情况，用来回答「我今天练了吗」「这周练了几次」「下次该练什么」「我的训练规律」。
+        """查询健身打卡的客观记录：今天状态、本周明细、本月统计、最近几次、累计汇总。
+
+        只回答「事实」，不给建议。要建议、要分析、问「该练什么」请改用 fitness_advice。
+
+        什么时候用：用户问「我今天练了吗」「这周练了几次」「这个月怎么样」「最近都练了啥」。
 
         Args:
             range(string): 查询范围，可选：
                 today（今天）/ week（本周明细）/ month（本月）/ recent（最近几次）/ stats（累计汇总）
-                advice（下一步该练什么 + 与上周对比，用户问「我最近怎么样」「该练啥」时用）
-                rhythm（训练规律，用户问「我一般周几练」时用）
-                parts（近 28 天部位分布，用户问「哪里练得多/少」时用）
         """
         if not self._allow_tools():
             yield event.plain_result("健身相关功能现在是关闭的。")
@@ -315,28 +316,6 @@ class FitnessPlugin(Star):
                 text = render.render_recent(doc)
             elif key in ("stats", "统计", "汇总"):
                 text = render.render_stats(doc, today)
-            elif key in ("advice", "建议", "下一步", "plan"):
-                # 「下一步该练什么」：把建议和周对比拼在一起，回答「我最近怎么样、该练啥」
-                text = (
-                    insight.suggestion(doc, today)
-                    + "\n"
-                    + insight.compare_weeks(doc, today)
-                )
-            elif key in ("rhythm", "规律", "习惯"):
-                text = insight.rhythm(doc, today)
-            elif key in ("parts", "部位", "分布"):
-                parts = insight.part_stats(doc, days=28, today=today)
-                if not parts["counts"]:
-                    text = "最近 28 天还没有记录。"
-                else:
-                    rows = [
-                        f"{name} {times} 次"
-                        for name, times in sorted(parts["counts"].items(), key=lambda kv: -kv[1])
-                    ]
-                    neglected = insight.neglected_parts(doc, today)
-                    text = "最近 28 天部位分布：" + "、".join(rows)
-                    if neglected:
-                        text += f"\n已经 10 天以上没练：{'、'.join(neglected)}"
             else:
                 text = render.render_today(doc, today)
             yield event.plain_result(text)
@@ -381,13 +360,20 @@ class FitnessPlugin(Star):
 
     @filter.llm_tool(name="fitness_advice")
     async def fitness_advice_tool(self, event: AstrMessageEvent, focus: str = "next"):
-        """给出健身建议：下次该练什么、哪个部位被冷落了、最近的训练节奏如何。
+        """基于真实打卡记录给出训练建议与分析（不是单纯报数字）。
 
-        什么时候用：用户问「下次练什么」「我最近怎么样」「练得均衡吗」「哪天练比较好」。
-        这些建议基于真实打卡记录计算，数据不足时会明确说明，不要自己编造。
+        什么时候用：用户问「下次练什么」「我最近怎么样」「练得均衡吗」「哪里练得少」
+        「哪天练比较好」「我是不是该加量了」。
+        只想知道「练了几次」这类事实时，用 fitness_status，不要用这个。
+
+        这些结论都由代码计算，数据不足会明说，不要自己编造。
 
         Args:
-            focus(string): 关注点，可选 next（下次练什么，默认）/ balance（部位是否均衡）/ rhythm（习惯周几练）/ compare（和上周比）。
+            focus(string): 关注点，可选
+                next（下次练什么，默认）
+                balance（部位是否均衡，含近 28 天分布与冷落部位）
+                rhythm（习惯周几练）
+                compare（和上周比进度）
         """
         if not self._allow_tools():
             yield event.plain_result("健身相关功能现在是关闭的。")
