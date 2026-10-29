@@ -112,11 +112,37 @@ def render_stats(doc: dict, today: date) -> str:
     )
 
 
-def render_marked(entry: dict, day: str, changed: bool) -> str:
+def render_marked(entry: dict, day: str, changed: bool, doc: dict | None = None) -> str:
+    """记录后的反馈。
+
+    只报「记了什么」是不够的 —— 打完卡用户最想知道的是「这下够了吗」。
+    所以带上本周进度，一句话说完，不啰嗦。
+    """
     if not entry:
-        return f"{day} 已更新。"
+        # 理论上不该走到这里（写入成功必有 entry）。
+        # 真走到了说明服务端返回异常，别硬说「已更新」误导用户。
+        return f"{day} 的记录没拿到返回结果，请在 App 里确认一下。"
     verb = "更新" if changed else "记录"
-    return (
+    line = (
         f"{day} 已{verb}：{st.items_summary(entry)}，共 {entry.get('mins')} 分钟，"
         f"感觉{st.effort_label(entry.get('effort'))}。"
     )
+
+    if not doc:
+        return line
+
+    today = date.today()
+    week = st.week_stats(doc, today)
+    week_goal, _ = st.goal_of(doc)
+    need = max(0, week_goal - week["count"])
+    left = (st.end_of_week(today) - today).days + 1
+
+    if need == 0:
+        tail = f"本周 {week['count']}/{week_goal}，目标已达成。"
+    else:
+        tail = f"本周 {week['count']}/{week_goal}，还差 {need} 次，剩 {left} 天。"
+
+    run = st.streak(doc, today)
+    if run["current"] >= 2:
+        tail += f"连续 {run['current']} 天。"
+    return line + "\n" + tail

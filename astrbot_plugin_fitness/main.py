@@ -279,7 +279,8 @@ class FitnessPlugin(Star):
                         else await client.mark_day(day, items=item_list)
                     )
             entry = data.get("entry") or {}
-            yield event.plain_result(render.render_marked(entry, day, existed))
+            # 用写入后返回的最新文档算进度，免得再额外拉一次
+            yield event.plain_result(render.render_marked(entry, day, existed, data.get("doc")))
         except FitnessError as exc:
             yield event.plain_result(f"没记上：{exc}")
         except Exception as exc:  # noqa: BLE001
@@ -471,8 +472,8 @@ def _last_items(doc: dict, today: date, limit: int = 3) -> list[dict] | None:
         if not name:
             continue
         # 复用历史项目名时也要过一遍归一表，避免把早先的口语名（如「腿」）一直传下去
-        entry = {"name": canonical_item(name, st.clean_tag)}
-        if it.get("mins"):
-            entry["mins"] = int(it["mins"])
-        out.append(entry)
+        # 只沿用项目名，不沿用上一次的时长：
+        # 上次练了 90 分钟，不代表这次也是 90 分钟。时长交给 Worker 用默认值兜底，
+        # 用户真想改，说一句「今天练了 30 分钟」就行。
+        out.append({"name": canonical_item(name, st.clean_tag)})
     return out or None
