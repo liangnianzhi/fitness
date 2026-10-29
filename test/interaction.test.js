@@ -87,3 +87,66 @@ test('同一天先打卡再取消，最终状态是未打卡', () => {
   assert.equal(isChecked(state, todayKey), false)
   assert.ok(normalizeState(state).unmarks[todayKey] > 0, '应留下取消时间戳用于多端合并')
 })
+
+/* ---------- 编辑保存：无改动不写时间戳 ---------- */
+
+/** 复刻 app.js 的 sameItems */
+function sameItems(a, b) {
+  const listA = Array.isArray(a) ? a : []
+  const listB = Array.isArray(b) ? b : []
+  if (listA.length !== listB.length) return false
+  for (let i = 0; i < listA.length; i++) {
+    const x = listA[i]
+    const y = listB[i]
+    if (!x || !y) return false
+    if (x.name !== y.name || Number(x.mins) !== Number(y.mins) || x.effort !== y.effort) return false
+  }
+  return true
+}
+
+test('sameItems：内容一致时判定为未改动', () => {
+  const a = [{ name: '力量训练', mins: 45, effort: 'hard' }]
+  const b = [{ name: '力量训练', mins: 45, effort: 'hard' }]
+  assert.equal(sameItems(a, b), true)
+})
+
+test('sameItems：改时长算改动', () => {
+  const a = [{ name: '力量训练', mins: 45, effort: 'hard' }]
+  const b = [{ name: '力量训练', mins: 60, effort: 'hard' }]
+  assert.equal(sameItems(a, b), false)
+})
+
+test('sameItems：改强度算改动', () => {
+  const a = [{ name: '力量训练', mins: 45, effort: 'normal' }]
+  const b = [{ name: '力量训练', mins: 45, effort: 'maxed' }]
+  assert.equal(sameItems(a, b), false)
+})
+
+test('sameItems：增删项目算改动', () => {
+  const a = [{ name: '力量训练', mins: 45, effort: 'normal' }]
+  const b = [
+    { name: '力量训练', mins: 45, effort: 'normal' },
+    { name: '拉伸', mins: 15, effort: 'easy' },
+  ]
+  assert.equal(sameItems(a, b), false)
+})
+
+test('sameItems：空值容错', () => {
+  assert.equal(sameItems(null, []), true)
+  assert.equal(sameItems(undefined, [{ name: 'x', mins: 1, effort: 'easy' }]), false)
+})
+
+test('未改动时不应刷新打卡时间戳（多端合并安全）', () => {
+  const t1 = 1000
+  let state = markDay(emptyState(), todayKey, {
+    t: t1,
+    items: [{ name: '力量训练', mins: 45, effort: 'normal' }],
+  })
+  const beforeT = state.marks[todayKey].t
+
+  // 模拟「打开抽屉什么都没改就保存」：sameItems 为 true，不应调用 markDay
+  const draftItems = state.marks[todayKey].items.map((it) => ({ ...it }))
+  const changed = !sameItems(state.marks[todayKey].items, draftItems)
+  assert.equal(changed, false, '内容一致应判定未改动')
+  assert.equal(state.marks[todayKey].t, beforeT, '时间戳不应被刷新')
+})

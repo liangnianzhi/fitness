@@ -744,8 +744,33 @@ function unitShift(direction) {
   } else {
     cursor = new Date(cursor.getFullYear() + direction, cursor.getMonth(), 1)
   }
+  // 翻页后把选中日期落到新周期里，否则底部按钮还指着上个月的某天：
+  // 文案会变成「为 10月28日 打卡」，用户看不见那天，却一点就把卡打到看不见的地方。
+  selection = selectionForPeriod(cursor, view)
   renderAll()
   maybeShowReview('navigate')
+}
+
+/**
+ * 切换周期后，选中日期该落在哪一天。
+ *  - 新周期包含今天 -> 选今天（最常见的诉求）
+ *  - 否则 -> 选该周期的第一天（月视图当月 1 号，周视图周一，年视图 1 月 1 日）
+ */
+function selectionForPeriod(anchor, mode) {
+  const today = ymd(new Date())
+  if (mode === 'week') {
+    const start = startOfWeek(anchor)
+    const end = endOfWeek(anchor)
+    if (today >= ymd(start) && today <= ymd(end)) return today
+    return ymd(start)
+  }
+  if (mode === 'month') {
+    if (ymd(anchor).slice(0, 7) === today.slice(0, 7)) return today
+    return ymd(startOfMonth(anchor))
+  }
+  // 年视图
+  if (String(anchor.getFullYear()) === today.slice(0, 4)) return today
+  return `${anchor.getFullYear()}-01-01`
 }
 
 function gotoToday() {
@@ -1153,20 +1178,57 @@ function saveEditDraft() {
     showToast({ text: '至少选一个训练项目', icon: 'warn' })
     return
   }
-  state = markDay(state, editTarget, {
-    t: Date.now(),
-    items: editDraft.items.map((it) => ({ name: it.name, mins: it.mins, effort: editDraft.effort })),
-  })
-  // 记住每个标签这次用的时长
+
+  const key = editTarget
+  const before = markOf(state, key)
+  const items = editDraft.items.map((it) => ({
+    name: it.name,
+    mins: it.mins,
+    effort: editDraft.effort,
+  }))
+  const isNew = !before
+  const changed = isNew || !sameItems(before.items, items)
+
+  // 记住每个标签这次用的时长（这个无论如何都记，属于使用习惯而非记录本身）
   for (const it of editDraft.items) {
     state = rememberItemMins(state, it.name, it.mins)
   }
-  state = setSettings(state, { defaultEffort: editDraft.effort })
+
+  if (changed) {
+    state = markDay(state, key, { t: Date.now(), items })
+    state = setSettings(state, { defaultEffort: editDraft.effort })
+  }
+  // 没改动就不写、不刷新时间戳：
+  // 否则多端合并时会误以为「这条更新了」，把别处更新过的内容顶掉。
+
   persist()
-  selection = editTarget
+  selection = key
   renderAll()
   closeSheet('editSheet')
-  showToast({ text: `${cnDate(editTarget)} 健身打卡成功` })
+
+  if (!changed) {
+    showToast({ text: '没有改动', icon: 'none' })
+  } else if (isNew) {
+    showToast({ text: `${cnDate(key)} 健身打卡成功` })
+  } else {
+    showToast({ text: `${cnDate(key)} 已更新`, icon: 'none' })
+  }
+}
+
+/** 比较两天的训练项目是否一致（只看项目名、时长、强度） */
+function sameItems(a, b) {
+  const listA = Array.isArray(a) ? a : []
+  const listB = Array.isArray(b) ? b : []
+  if (listA.length !== listB.length) return false
+  for (let i = 0; i < listA.length; i++) {
+    const x = listA[i]
+    const y = listB[i]
+    if (!x || !y) return false
+    if (x.name !== y.name || Number(x.mins) !== Number(y.mins) || x.effort !== y.effort) {
+      return false
+    }
+  }
+  return true
 }
 /* ================================================================== *
  * 5. 周 / 月回顾
@@ -1544,6 +1606,8 @@ function bindEvents() {
       if (view === btn.dataset.view) return
       view = btn.dataset.view
       if (view === 'year') cursor = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
+      // 切视图后同样要把选中日期拉回当前周期，否则底部按钮会指向看不见的日子
+      selection = selectionForPeriod(cursor, view)
       renderAll()
       haptic()
     })
