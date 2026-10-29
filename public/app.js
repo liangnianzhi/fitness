@@ -774,7 +774,7 @@ let gesture = null
  *  - 轻点某天 -> 选中；已打卡的日期直接打开编辑
  *  - 长按某天（或最近记录）-> 快捷打开编辑（保留，老用户习惯）
  *  - 轻点年视图里的某个月 -> 跳到该月
- *  - 左右滑动 -> 换周期；上下滑动 -> 翻页
+ *  - 左右滑动 -> 换周期（只认横向，纵向留给页面滚动）
  */
 function attachGestures() {
   const box = viewport
@@ -836,10 +836,13 @@ function attachGestures() {
 
     const dx = e.clientX - g.x
     const dy = e.clientY - g.y
-    if (Math.abs(dx) > Math.abs(dy)) {
-      if (Math.abs(dx) > 42) unitShift(dx < 0 ? 1 : -1)
-    } else if (Math.abs(dy) > 52) {
-      unitShift(dy < 0 ? 1 : -1) // 上滑看下一段，下滑看上一段
+
+    // 只响应横向滑动。
+    // 以前纵向滑动也用来翻周期，但页面本身要滚动（看统计、看最近记录），
+    // 两者会同时触发：往上滚一下就翻到了下个月，非常容易误操作。
+    // 纵向翻页交给键盘方向键和顶部「今天」按钮，触屏上就靠横向滑。
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 42) {
+      unitShift(dx < 0 ? 1 : -1)
     }
   }
 
@@ -1778,6 +1781,44 @@ async function importJson(e) {
   }
 }
 
+/* ---------- 离线支持 ---------- */
+
+/**
+ * 注册 Service Worker，让断网时也能打开打卡页。
+ * 本地文件/非 https 环境下跳过（浏览器本来就不允许）。
+ */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost') return
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* 注册失败不影响打卡，静默即可 */
+    })
+  })
+}
+
+/**
+ * 网络状态提示。
+ * 打卡数据存在本机，断网照样能记；但用户需要知道「现在是离线，稍后会自动同步」，
+ * 否则会以为记录丢了。
+ */
+function watchOnlineState() {
+  const update = () => {
+    if (navigator.onLine) {
+      setSyncLabel(state.settings.syncId && cloud.enabled ? '已恢复连接' : '本机保存中')
+    } else {
+      setSyncLabel('离线中 · 打卡记录先存在本机')
+    }
+  }
+  window.addEventListener('online', () => {
+    update()
+    // 恢复网络后主动补一次同步
+    if (cloud.enabled && state.settings.syncId) void pullAndMerge()
+  })
+  window.addEventListener('offline', update)
+  if (!navigator.onLine) update()
+}
+
 /* ---------- 启动 ---------- */
 
 function boot() {
@@ -1792,6 +1833,8 @@ function boot() {
   attachRecentGestures()
   bindEvents()
   void initSync()
+  registerServiceWorker()
+  watchOnlineState()
 
   // 每次打开 / 回到前台都检查：新的周或月第一次打开就要出分析
   maybeShowReview('auto')

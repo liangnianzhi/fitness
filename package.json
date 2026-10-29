@@ -6,7 +6,7 @@
   "description": "苹果风格的可编辑健身打卡日历，周/月/年视图，部署在 Cloudflare Workers，支持服务端合并同步与机器人渠道打卡，并接入阿里 page-agent 做每周/每月健身频次分析。",
   "license": "MIT",
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/analysis.test.js test/store.test.js test/worker.test.js test/edge.test.js test/items.test.js test/merge.test.js test/append.test.js test/interaction.test.js",
+    "test": "node --test --test-concurrency=1 test/analysis.test.js test/store.test.js test/worker.test.js test/edge.test.js test/items.test.js test/merge.test.js test/append.test.js test/interaction.test.js test/sw.test.js",
     "check": "node --check public/app.js && node --check public/analysis.js && node --check public/store.js && node --check src/worker.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

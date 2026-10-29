@@ -240,7 +240,12 @@ svg {
 }
 
 #viewport {
+  /* 纵向滚动交给浏览器，横向手势留给 JS 翻周期。
+     不写 pan-y 的话，iOS 上长按日期会弹出「拷贝/查询」菜单，盖住编辑抽屉。 */
   touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   will-change: transform;
 }
 
