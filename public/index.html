@@ -176,19 +176,16 @@
 </div>
 
 <!--
-  阿里 page-agent：官方「一行 script 接入」（README 的 Quick Start）。
-  ?autoInit=false   只加载库，不自动创建 demo agent（我们自己 new PageAgent，以便传入分析指令）
-  ?showPanel=false  不默认弹面板（面板只在我们发起分析时才 show）
-  ?lang=zh-CN       面板中文
-  国内访问 jsDelivr 不稳时，app.js 会自动回退到 npmmirror 镜像：
-  https://registry.npmmirror.com/page-agent/1.12.4/files/dist/iife/page-agent.demo.js
+  阿里 page-agent 不再在这里静态引入。
+  它由 app.js 的 loadPageAgent() 懒加载：真正点「AI 分析」时才去拉，
+  jsDelivr 失败会自动回退 npmmirror 镜像，并且只在在线时预热。
+
+  为什么从 HTML 里删掉：
+    1. 打卡是每天打开一次的高频操作，而 AI 分析只是偶尔用。把它放进首屏
+       等于每次都白付一份 CDN 带宽，且国内访问 jsDelivr 本来就不稳。
+    2. 原来这里失败只是设一个没人读的全局变量，和 app.js 里的回退逻辑重复。
+  现在只有 app.js 一处加载逻辑，少了「两套机制打架」的风险。
 -->
 <script type="module" src="./app.js"></script>
-<script
-  src="https://cdn.jsdelivr.net/npm/page-agent@1.12.4/dist/iife/page-agent.demo.js?autoInit=false&showPanel=false&lang=zh-CN"
-  crossorigin="anonymous"
-  defer
-  onerror="window.__fitcalPageAgentFailed = true"
-></script>
 </body>
 </html>

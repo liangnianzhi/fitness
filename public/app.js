@@ -1845,10 +1845,11 @@ function boot() {
   })
   window.addEventListener('pageshow', refreshTodayIfNeeded)
 
-  // 预热 page-agent（不自动弹面板）
-  if (navigator.onLine) {
-    setTimeout(loadPageAgent, 1200)
-  }
+  // 不再预热 page-agent。
+  // 打卡是每天打开一次的高频动作，而 AI 分析只是偶尔用；
+  // 原来每次打开 1.2 秒后都去拉一次 CDN（100KB+），国内还经常拉不动，
+  // 纯粹是浪费流量，也会拖慢首屏。
+  // 现在只有真正点「AI 分析」或自动分析触发时才加载，见 loadPageAgent()。
 }
 
 if (document.readyState === 'loading') {
