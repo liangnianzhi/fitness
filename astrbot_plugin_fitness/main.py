@@ -22,7 +22,7 @@ from astrbot.api.star import Context, Star, register
 
 from . import statics as st
 from .client import FitnessClient, FitnessError
-from . import insight, render
+from . import context, insight, render
 from .aliases import canonical_effort, canonical_item
 
 MAX_BACKFILL_DAYS = 30
@@ -344,6 +344,39 @@ class FitnessPlugin(Star):
         except Exception as exc:  # noqa: BLE001
             logger.error(f"健身插件查询失败: {exc}", exc_info=True)
             yield event.plain_result("查询出错了，稍后再试。")
+
+    @filter.llm_tool(name="fitness_context")
+    async def fitness_context_tool(self, event: AstrMessageEvent, question: str = ""):
+        """获取用户当前的真实健身状态，用于在对话中给出有依据的回应。
+
+        什么时候用：只要用户提到健身、训练、身体状态、累不累、想不想练、坚持不下去、
+        最近怎么样这类话题，就先调用它拿到事实，再组织语言回答。
+        不要在没调用的情况下编造「你这周练了 3 次」这类数字。
+
+        典型场景：
+        - 用户说「最近好累，不想练了」→ 先看真实间隔与连续天数，再决定是安慰还是建议降量
+        - 用户说「我今天状态怎么样」「你觉得我练得够吗」→ 拿事实回答
+        - 用户说「我该坚持吗」「是不是没效果」→ 用真实数据回话，而不是空泛鼓励
+        - 闲聊里提到健身时，用来避免说错数字
+
+        Args:
+            question(string): 用户这次具体关心什么，用一句话概括，便于聚焦。可以为空。
+        """
+        if not self._allow_tools():
+            yield event.plain_result("健身相关功能现在是关闭的。")
+            return
+
+        try:
+            client = await self._ready_client()
+            doc = await client.pull()
+            text = context.answer(doc, question, date.today())
+            yield event.plain_result(text)
+        except FitnessError as exc:
+            # 拿不到数据时也要能继续聊，不能因为读不到记录就卡死对话
+            yield event.plain_result(f"（暂时读不到打卡记录：{exc}，可以照常聊，但别引用具体数字）")
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"健身插件取上下文失败: {exc}", exc_info=True)
+            yield event.plain_result("（暂时读不到打卡记录，可以照常聊，但别引用具体数字）")
 
     @filter.llm_tool(name="fitness_advice")
     async def fitness_advice_tool(self, event: AstrMessageEvent, focus: str = "next"):
