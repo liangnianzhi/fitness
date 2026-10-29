@@ -345,6 +345,20 @@ async function initSync() {
     setSyncLabel('记录只保存在本机（可在设置里开启跨设备同步）')
     return
   }
+
+  // 本机没有口令时先尝试自愈。
+  // iOS 会清理脚本可写存储，换浏览器打开也会是空的 —— 这时如果只认本机口令，
+  // 云端明明有记录却永远拉不下来，用户会以为数据丢了。
+  // 前提是本机确实没有任何记录，避免把两台不同步口令的设备串到一起。
+  if (!state.settings.syncId && Object.keys(state.marks).length === 0) {
+    setSyncLabel('正在找回云端记录…')
+    const found = await sync.discover()
+    if (found) {
+      state = setSettings(state, { syncId: found })
+      saveLocal(state, storage)
+    }
+  }
+
   setSyncLabel(state.settings.syncId ? '正在同步…' : '本机保存中 · 可在设置里开启跨设备同步')
   if (state.settings.syncId) await pullAndMerge()
   else renderAll()

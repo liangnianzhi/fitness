@@ -461,6 +461,29 @@ export function createSync(fetchImpl, basePath = '/api') {
         return { store: false }
       }
     },
+    /**
+     * 找回同步口令。
+     *
+     * 场景：手机上 localStorage 被 iOS 清掉、或换了个浏览器打开，
+     * 本机没有 syncId 就永远不拉云端，用户会以为记录丢了。
+     * 这里向 Worker 询问当前活跃口令，把它写回本地即可自愈。
+     *
+     * 只读、不写入数据；拿不到就返回 null，页面照常本机可用。
+     */
+    async discover(syncId) {
+      try {
+        const res = await doFetch(`${basePath}/active`, {
+          headers: { accept: 'application/json', 'x-fitcal-client': '1' },
+        })
+        if (!res.ok) return null
+        const data = await res.json()
+        const id = data && data.syncId
+        if (typeof id === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(id)) return id
+        return null
+      } catch {
+        return null
+      }
+    },
   }
   return client
 }

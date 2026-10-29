@@ -56,6 +56,9 @@ class FitnessClient:
                 headers={
                     "Accept": "application/json",
                     "User-Agent": _UA,
+                    # Worker 的 /api/active 只放行同源页面或带这个头的调用方，
+                    # 防止任意第三方网页把口令抓走
+                    "X-Fitcal-Client": "1",
                 },
             )
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:

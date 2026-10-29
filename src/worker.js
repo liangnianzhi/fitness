@@ -93,6 +93,48 @@ function deriveDay(items) {
   return { mins, effort }
 }
 
+/** 内置常用项目，与 public/store.js 的 BUILTIN_QUICK_ITEMS 保持一致 */
+const BUILTIN_QUICK_ITEMS = ['跑步机', '力量训练', '拉伸', '团操', '动感单车', '游泳']
+
+/**
+ * 把当天用到的项目名登记进 settings，让它们出现在 App 的可选项里。
+ *
+ * 为什么需要：机器人只能写 marks，而 App 的项目列表来自 settings.customTags / quickItems。
+ * 用户说「今天打篮球」，记录能存进去，但打开网页时候选里没有「篮球」，
+ * 下次想选还得重新输入 —— 数据记了却用不上。
+ *
+ * 内置项目不重复登记；自定义项目上限 40，与 store.js 一致。
+ */
+function registerItemTags(doc, items) {
+  if (!Array.isArray(items) || !items.length) return doc
+  const settings = doc.settings || {}
+  const custom = Array.isArray(settings.customTags) ? [...settings.customTags] : []
+  const quick = Array.isArray(settings.quickItems) ? [...settings.quickItems] : []
+  const seenCustom = new Set(custom)
+  const seenQuick = new Set(quick)
+
+  let touched = false
+  for (const it of items) {
+    const name = cleanTag(it && it.name)
+    if (!name) continue
+    const isBuiltin = BUILTIN_QUICK_ITEMS.includes(name)
+
+    if (!seenCustom.has(name) && custom.length < 40) {
+      custom.push(name)
+      seenCustom.add(name)
+      touched = true
+    }
+    if (!isBuiltin && !seenQuick.has(name) && quick.length < 40) {
+      quick.push(name)
+      seenQuick.add(name)
+      touched = true
+    }
+  }
+
+  if (!touched) return doc
+  return { ...doc, settings: { ...settings, customTags: custom, quickItems: quick } }
+}
+
 /** 校验并规整完整文档，只保留结构合法的部分 */
 function sanitizeDoc(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
@@ -264,7 +306,7 @@ function applyDayOp(doc, op) {
     next.marks[key] = { t, mins: derivedAppend.mins, effort: derivedAppend.effort, items: capped }
     delete next.unmarks[key]
     next.meta = { ...(next.meta || {}), updatedAt: t }
-    return next
+    return registerItemTags(next, fresh)
   }
 
   // mark / update：已有记录时作为兜底默认值，与 markDay 的 patch 语义一致
@@ -300,7 +342,8 @@ function applyDayOp(doc, op) {
   next.marks[key] = { t, mins: derived.mins, effort: derived.effort, items }
   delete next.unmarks[key]
   next.meta = { ...(next.meta || {}), updatedAt: t }
-  return next
+  // 把用到的项目登记进 settings，App 里下次就能直接选
+  return registerItemTags(next, items)
 }
 
 async function readJson(request) {
@@ -360,10 +403,22 @@ export default {
       )
     }
 
-    // GET /api/active —— 返回最近一次写入的同步口令，供机器人零配置接入
+    // GET /api/active —— 返回最近一次写入的同步口令
+    //
+    // 用途有两个：机器人零配置接入、以及网页本机口令丢失后的自愈。
+    // 因为口令本身就是访问凭证，这里做了两道限制：
+    //   1. 只允许同源页面或显式带 X-Fitcal-Client 头的调用方读取，
+    //      避免任意第三方网页直接抓走口令。
+    //   2. 不返回 CORS 放宽头，浏览器跨域请求拿不到结果。
     if (url.pathname === '/api/active') {
       if (!env.CHECKINS) {
         return json({ error: '该 Worker 未绑定 KV（CHECKINS）' }, 501, CORS_HEADERS)
+      }
+      const viaClient = request.headers.get('x-fitcal-client') === '1'
+      const sameOrigin = request.headers.get('sec-fetch-site') === 'same-origin'
+      // 非浏览器调用（如服务端插件）通常没有 sec-fetch-site，用自定义头放行
+      if (!viaClient && !sameOrigin) {
+        return json({ error: 'forbidden' }, 403, { 'cache-control': 'no-store' })
       }
       const active = await env.CHECKINS.get(ACTIVE_KEY, 'text')
       if (!active) return json({ ok: true, syncId: null }, 200, CORS_HEADERS)
